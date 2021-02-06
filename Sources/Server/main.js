@@ -65,7 +65,6 @@ board.on("ready", function() {
 
   // Parse configuration, set LED to solid green to indicate that track is ready.
   parseConfig();
-  updateLEDState(1);
 
   // Monitor events from track release mechanism
   CONFIG.RELEASE.ctl.on("up", function() {
@@ -76,21 +75,12 @@ board.on("ready", function() {
       CONFIG.RACE_STATUS = "RACING";
       console.log("Race started!");
     }
-  }).on("hold", function(){
-      // Reset application state when mechanism is loaded with new vehicles.
-      //resetState(); // this is dangerous as it could prematurely wipe out the results. instead do a manual reset
-      CONFIG.LED_INDICATOR.ctl.stop();
-  }).on("down", function(){
-     updateLEDState(1);
-     console.log("Waiting to start");
   });
 
   // Resets track state (clears all records)
   // Will also blink light to indicate that the track has been reset.
   CONFIG.RESET.ctl.on("down", function() {
-    CONFIG.LED_INDICATOR.ctl.stop();
     resetState();
-    updateLEDState(1);
   }).on("up", function(){
     updateLEDState(0);
   });
@@ -98,7 +88,7 @@ board.on("ready", function() {
   // Setup tracks based on CONFIG
   // Only records end time if one hasn't been recorded yet
   // Will maintain first recorded time until track is reset to prevent accidental overwrites.
-  console.log("Num tracks: ", CONFIG.TRACKS.length);
+  console.log("Num tracks configured: ", CONFIG.TRACKS.length);
   for (var i=0; i < CONFIG.TRACKS.length; i++){
      CONFIG.TRACKS[i].ctl.on("change", function() {
 	if (this.value === 0) 
@@ -108,18 +98,19 @@ board.on("ready", function() {
 
   console.log("Num lanes in use: ", CONFIG.LANES_IN_USE);
 
+  resetState();
+
 });
 
 http.createServer(function(req, res) {
 
     if (req.method === "GET") {
-
         var call = url.parse(req.url, true);
 
         // allow any origin to make API calls.
         res.setHeader('Access-Control-Allow-Origin', '*');
 
-        processRequest(call.pathname, req, res);
+        processRequest(call.pathname, call.query, req, res);
 
     } else {
         res.writeHead(400);
@@ -127,12 +118,11 @@ http.createServer(function(req, res) {
             error: "method not implemented"
         }));
     }
-
 }.bind({
     CONFIG: CONFIG
 })).listen(CONFIG.HTTP_PORT);
 
-function processRequest(method, req, res) {
+function processRequest(method, params, req, res) {
 
     switch (method) {
         case "/get/state": // Retrieve track/application state
@@ -154,6 +144,12 @@ function processRequest(method, req, res) {
                 command_sent: true
             }));
             resetState();
+
+            if (params.lanes) {
+               CONFIG.LANES_IN_USE = params.lanes;
+               console.log("Changed LANES_IN_USE to " + CONFIG.LANES_IN_USE);
+            }
+
             break;
 
         default: // Unhandled API method
@@ -212,6 +208,10 @@ function resetState(){
   }
   CONFIG.RACE_STATUS = "WAIT";
   CONFIG.LANES_COMPLETED = 0;
+
+  updateLEDState(1);
+
+  console.log("Waiting to start");
 }
 
 //Set number of lanes complete and status of race
@@ -225,10 +225,9 @@ function setLaneCompleted(lane){
     }
 
     //check if last lane then end race
-    if (CONFIG.LANES_IN_USE === CONFIG.LANES_COMPLETED) {
+    if (CONFIG.LANES_IN_USE == CONFIG.LANES_COMPLETED && CONFIG.RACE_STATUS != "COMPLETE") {
        CONFIG.RACE_STATUS = "COMPLETE";
        CONFIG.LED_INDICATOR.ctl.stop(); //stop blinking
-       CONFIG.LED_INDICATOR.ctl.on(); //turn on to indicate race complete
        console.log("Race Complete");
     }
 }
@@ -241,7 +240,7 @@ function computeElapsedTime(startTime, endTime){
 
 // @params state - 1 or 0 for on or off, respectively.
 function updateLEDState(state) {
-  return state === 0 ? CONFIG.LED_INDICATOR.ctl.off() : CONFIG.LED_INDICATOR.ctl.on();
+  return state === 1 ? CONFIG.LED_INDICATOR.ctl.off() : CONFIG.LED_INDICATOR.ctl.on();
 }
 
 // Blink LED indicator rapidly (every 100ms) on uncaught exceptions.
