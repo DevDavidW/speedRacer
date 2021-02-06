@@ -1,5 +1,4 @@
-// WIFI PW is chimchim
-var raspi = require('raspi-io');
+var raspi = require('raspi-io').RaspiIO;
 var five = require('johnny-five');
 var board = new five.Board({io: new raspi()});
 var http = require('http');
@@ -7,48 +6,59 @@ var url = require('url');
 
 var CONFIG = {
     RELEASE: {
-            pin: "GPIO6",
+            pin: "GPIO25",
             human_name: "Release Mechanism",
             startTime: '',
             ctl: {}
     },
     RESET: {
-            pin: "GPIO12",
+            pin: "GPIO17",
             human_name: "Reset Button",
             ctl: {}
     },
     LED_INDICATOR: {
-            pin: "GPIO5",
+            pin: "GPIO4",
             human_name: "LED Indicator",
             ctl: {}
     },
     TRACKS: [
         {
             id: 1,
-            pin: "GPIO13",
-            human_name: "Track 1",
+            pin: "GPIO18",
+            human_name: "Lane 1",
             endTime: '',
             computedTimeSeconds: '',
             ctl: {}
         },
         {
             id: 2,
-            pin: "GPIO19",
-            human_name: "Track 2",
+            pin: "GPIO27",
+            human_name: "Lane 2",
             endTime: '',
             computedTimeSeconds: '',
             ctl: {}
         },
         {
             id: 3,
-            pin: "GPIO26",
-            human_name: "Track 3",
-	          endTime: '',
+            pin: "GPIO22",
+            human_name: "Lane 3",
+            endTime: '',
+            computedTimeSeconds: '',
+            ctl: {}
+        },
+        {
+            id: 4,
+            pin: "GPIO23",
+            human_name: "Lane 4",
+            endTime: '',
             computedTimeSeconds: '',
             ctl: {}
         }
     ],
-    HTTP_PORT: 8080
+    HTTP_PORT: 8080,
+    LANES_IN_USE: 4,
+    LANES_COMPLETED: 0,
+    RACE_STATUS: "WAIT"
 };
 
 board.on("ready", function() {
@@ -63,11 +73,16 @@ board.on("ready", function() {
     if(CONFIG.RELEASE.startTime === ""){ // Never overwrite existing start times
       CONFIG.RELEASE.startTime = Date.now(); // Record time
       CONFIG.LED_INDICATOR.ctl.blink(500); // Blink until reset
+      CONFIG.RACE_STATUS = "RACING";
+      console.log("Race started!");
     }
   }).on("hold", function(){
       // Reset application state when mechanism is loaded with new vehicles.
-      resetState();
+      //resetState(); // this is dangerous as it could prematurely wipe out the results. instead do a manual reset
       CONFIG.LED_INDICATOR.ctl.stop();
+  }).on("down", function(){
+     updateLEDState(1);
+     console.log("Waiting to start");
   });
 
   // Resets track state (clears all records)
@@ -75,33 +90,24 @@ board.on("ready", function() {
   CONFIG.RESET.ctl.on("down", function() {
     CONFIG.LED_INDICATOR.ctl.stop();
     resetState();
-    updateLEDState(0);
-  }).on("up", function(){
     updateLEDState(1);
+  }).on("up", function(){
+    updateLEDState(0);
   });
 
+  // Setup tracks based on CONFIG
   // Only records end time if one hasn't been recorded yet
   // Will maintain first recorded time until track is reset to prevent accidental overwrites.
-  CONFIG.TRACKS[0].ctl.on("down", function() {
-    if(CONFIG.TRACKS[0].endTime === ""){
-      CONFIG.TRACKS[0].endTime = Date.now();
-      CONFIG.TRACKS[0].computedTimeSeconds = computeElapsedTime(CONFIG.RELEASE.startTime, CONFIG.TRACKS[0].endTime);
-    }
-  });
+  console.log("Num tracks: ", CONFIG.TRACKS.length);
+  for (var i=0; i < CONFIG.TRACKS.length; i++){
+     CONFIG.TRACKS[i].ctl.on("change", function() {
+	if (this.value === 0) 
+           setLaneCompleted(this.id);
+     });
+  }
 
-  CONFIG.TRACKS[1].ctl.on("down", function() {
-    if(CONFIG.TRACKS[1].endTime === ""){
-      CONFIG.TRACKS[1].endTime = Date.now();
-      CONFIG.TRACKS[1].computedTimeSeconds = computeElapsedTime(CONFIG.RELEASE.startTime, CONFIG.TRACKS[1].endTime);
-    }
-  });
+  console.log("Num lanes in use: ", CONFIG.LANES_IN_USE);
 
-  CONFIG.TRACKS[2].ctl.on("down", function() {
-    if(CONFIG.TRACKS[2].endTime === ""){
-      CONFIG.TRACKS[2].endTime = Date.now();
-      CONFIG.TRACKS[2].computedTimeSeconds = computeElapsedTime(CONFIG.RELEASE.startTime, CONFIG.TRACKS[2].endTime);
-    }
-  });
 });
 
 http.createServer(function(req, res) {
@@ -167,7 +173,7 @@ function parseConfig() {
     CONFIG.RESET.ctl = new five.Button(CONFIG.RESET.pin);
 
     for (var i = 0; i < CONFIG.TRACKS.length; i++) {
-        CONFIG.TRACKS[i].ctl = new five.Button({pin: CONFIG.TRACKS[i].pin});
+        CONFIG.TRACKS[i].ctl = new five.Sensor({pin: CONFIG.TRACKS[i].pin, type: "digital", id: CONFIG.TRACKS[i].id});
     }
 
 }
@@ -187,6 +193,8 @@ function strip_gpioCtl(config) {
         stripped.TRACKS[i] = newCar;
     }
 
+    stripped.RACE_STATUS = config.RACE_STATUS;
+
     return stripped;
 }
 
@@ -202,6 +210,27 @@ function resetState(){
     CONFIG.TRACKS[i].endTime = '';
     CONFIG.TRACKS[i].computedTimeSeconds = '';
   }
+  CONFIG.RACE_STATUS = "WAIT";
+  CONFIG.LANES_COMPLETED = 0;
+}
+
+//Set number of lanes complete and status of race
+function setLaneCompleted(lane){
+    var i = lane-1;
+    if(CONFIG.TRACKS[i].endTime === ""){
+       CONFIG.TRACKS[i].endTime = Date.now();
+       CONFIG.TRACKS[i].computedTimeSeconds = computeElapsedTime(CONFIG.RELEASE.startTime, CONFIG.TRACKS[i].endTime);
+       CONFIG.LANES_COMPLETED += 1;
+       console.log("Lane " + lane + " finished");
+    }
+
+    //check if last lane then end race
+    if (CONFIG.LANES_IN_USE === CONFIG.LANES_COMPLETED) {
+       CONFIG.RACE_STATUS = "COMPLETE";
+       CONFIG.LED_INDICATOR.ctl.stop(); //stop blinking
+       CONFIG.LED_INDICATOR.ctl.on(); //turn on to indicate race complete
+       console.log("Race Complete");
+    }
 }
 
 // @params startTime - initial time at which car was released

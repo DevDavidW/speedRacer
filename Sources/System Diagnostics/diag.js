@@ -1,4 +1,4 @@
-var raspi = require('raspi-io');
+var raspi = require('raspi-io').RaspiIO;
 var five = require('johnny-five');
 var board = new five.Board({io: new raspi()});
 
@@ -10,42 +10,50 @@ var CONFIG = {
       runStarted: false
     },
     RELEASE: {
-            pin: "GPIO6",
+            pin: "GPIO25",
             human_name: "Release",
             startTime: '',
             ctl: {}
     },
     RESET: {
-            pin: "GPIO12",
+            pin: "GPIO17",
             human_name: "Reset",
             ctl: {}
     },
     LED_INDICATOR: {
-            pin: "GPIO5",
+            pin: "GPIO4",
             human_name: "LED Indicator",
             ctl: {}
     },
     TRACKS: [
         {
             id: 1,
-            pin: "GPIO13",
-            human_name: "Slot 1",
+            pin: "GPIO18",
+            human_name: "Lane 1",
             endTime: '',
             computedTimeSeconds: '',
             ctl: {}
         },
         {
             id: 2,
-            pin: "GPIO19",
-            human_name: "Slot 2",
+            pin: "GPIO27",
+            human_name: "Lane 2",
             endTime: '',
             computedTimeSeconds: '',
             ctl: {}
         },
         {
             id: 3,
-            pin: "GPIO26",
-            human_name: "Slot 3",
+            pin: "GPIO22",
+            human_name: "Lane 3",
+	    endTime: '',
+            computedTimeSeconds: '',
+            ctl: {}
+        },
+        {
+            id: 4,
+            pin: "GPIO23",
+            human_name: "Lane 4",
 	    endTime: '',
             computedTimeSeconds: '',
             ctl: {}
@@ -55,6 +63,7 @@ var CONFIG = {
 };
 
 board.on("ready", function() {
+  parseConfig();
 
   console.log("Blinking LED");
   CONFIG.LED_INDICATOR.ctl.blink(300);
@@ -63,8 +72,8 @@ board.on("ready", function() {
       console.log("RELEASE is UP.");
   }).on("down", function(){
       console.log("RELEASE is DOWN.");
-  }).on("hold", function(){
-      console.log("RELEASE is HELD.");
+  //}).on("hold", function(){
+  //    console.log("RELEASE is HELD.");
   });
 
   CONFIG.RESET.ctl.on("down", function() {
@@ -73,24 +82,16 @@ board.on("ready", function() {
      console.log("RESET is UP.");
   });
 
-  CONFIG.TRACKS[0].ctl.on("down", function() {
-     console.log("Track 1 is DOWN.");
-  }).on("up", function(){
-     console.log("Track 1 is UP.");
-  });
-
-  CONFIG.TRACKS[1].ctl.on("down", function() {
-     console.log("Track 2 is DOWN.");
-  }).on("up", function(){
-     console.log("Track 2 is UP.");
-  });
-
-  CONFIG.TRACKS[2].ctl.on("down", function() {
-     console.log("Track 3 is DOWN.");
-  }).on("up", function(){
-     console.log("Track 3 is UP.");
-  });
-
+  // Setup tracks based on CONFIG
+  console.log("Num tracks: ", CONFIG.TRACKS.length);
+  for (var i=0; i < CONFIG.TRACKS.length; i++){
+     CONFIG.TRACKS[i].ctl.on("change", function() {
+        if (this.value === 0)
+           console.log("TRACK " + this.id + " is OFF");
+        else
+           console.log("TRACK " + this.id + " is ON");
+     });
+  }
 });
 
 // Parses configuration and instantiates all relevant track components
@@ -101,7 +102,7 @@ function parseConfig() {
     CONFIG.RESET.ctl = new five.Button(CONFIG.RESET.pin);
 
     for (var i = 0; i < CONFIG.TRACKS.length; i++) {
-        CONFIG.TRACKS[i].ctl = new five.Button({pin: CONFIG.TRACKS[i].pin});
+        CONFIG.TRACKS[i].ctl = new five.Sensor({pin: CONFIG.TRACKS[i].pin, type: "digital", id: CONFIG.TRACKS[i].id});
     }
 
 }
