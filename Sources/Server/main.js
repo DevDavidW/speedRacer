@@ -3,6 +3,8 @@ var five = require('johnny-five');
 var board = new five.Board({io: new raspi()});
 var http = require('http');
 var url = require('url');
+var moment = require('moment');
+var file = require('fs');
 
 var CONFIG = {
     RELEASE: {
@@ -127,7 +129,12 @@ function processRequest(method, params, req, res) {
     switch (method) {
         case "/get/state": // Retrieve track/application state
             res.writeHead(200);
-            res.end(JSON.stringify(strip_gpioCtl(CONFIG, null, '\n')));
+            res.end(JSON.stringify(getState(CONFIG)));
+            break;
+
+        case "/get/prevstate": //Retrieve previous state from file log
+            res.writeHead(200);
+            res.end(getLastLogLine());
             break;
 
         case "/set/led": // Manually toggle LED state
@@ -175,28 +182,37 @@ function parseConfig() {
 }
 
 // Reads application state and removes j5 related properties.
-function strip_gpioCtl(config) {
+function getState(config) {
+    var state = {};
 
-    var stripped = {};
+    state.RACE_STATUS = config.RACE_STATUS;
+    state.START_TIME = config.RELEASE.startTime;
 
-    stripped.RELEASE = JSON.parse(JSON.stringify(config.RELEASE, GPIOreplacer));
-    delete stripped.RELEASE.ctl;
-
-    stripped.TRACKS = [];
+    state.TRACKS = [];
     for (var i = 0; i < config.TRACKS.length; i++) {
-        var newCar = JSON.parse(JSON.stringify(config.TRACKS[i], GPIOreplacer));
-        delete newCar.ctl;
-        stripped.TRACKS[i] = newCar;
+        var newCar = {
+           "Lane": config.TRACKS[i].id,
+           "endTime": config.TRACKS[i].endTime,
+           "elapsedTime": config.TRACKS[i].computedTimeSeconds
+        }
+        state.TRACKS[i] = newCar;
     }
 
-    stripped.RACE_STATUS = config.RACE_STATUS;
-
-    return stripped;
+    return state;
 }
 
-// Helper function for strip_gpioCtl, removes circular structures from status output
-function GPIOreplacer(key,value) {
-    return key == "ctl" ? undefined : value;
+//Reads in last line of log file
+function getLastLogLine() {
+   var response = "{}";
+
+   //if file exists, get last line containing a RACE_STATUS
+   if(file.existsSync("pwd.log")) {
+      response = require("child_process").execSync("grep RACE_STATUS pwd.log | tail -1").toString();
+      if (response.includes(" - "))
+         response = response.split(" - ")[1];
+   }
+
+   return response;
 }
 
 // Reset all recorded and computed times, for all tracks
@@ -210,6 +226,8 @@ function resetState(){
   CONFIG.LANES_COMPLETED = 0;
 
   updateLEDState(1);
+
+  writelog("RESET LANES=" + CONFIG.LANES_IN_USE);
 
   console.log("Waiting to start");
 }
@@ -228,7 +246,11 @@ function setLaneCompleted(lane){
     if (CONFIG.LANES_IN_USE == CONFIG.LANES_COMPLETED && CONFIG.RACE_STATUS != "COMPLETE") {
        CONFIG.RACE_STATUS = "COMPLETE";
        CONFIG.LED_INDICATOR.ctl.stop(); //stop blinking
+       updateLEDState(0);
        console.log("Race Complete");
+
+       //write results to log
+       writelog(JSON.stringify(getState(CONFIG)));
     }
 }
 
@@ -241,6 +263,12 @@ function computeElapsedTime(startTime, endTime){
 // @params state - 1 or 0 for on or off, respectively.
 function updateLEDState(state) {
   return state === 1 ? CONFIG.LED_INDICATOR.ctl.off() : CONFIG.LED_INDICATOR.ctl.on();
+}
+
+function writelog (message) {
+  file.appendFile("pwd.log", moment().format('MM-DD-YYYY hh:mm:ss') + " - " + message + "\n", (err) => {
+     if (err) throw err;
+  });
 }
 
 // Blink LED indicator rapidly (every 100ms) on uncaught exceptions.
