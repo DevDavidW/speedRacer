@@ -153,12 +153,13 @@ function processRequest(method, params, req, res) {
             res.end(JSON.stringify({
                 command_sent: true
             }));
-            resetState();
 
-            if (params.lanes) {
+            if (params.lanes && CONFIG.LANES_IN_USE != params.lanes) {
                CONFIG.LANES_IN_USE = params.lanes;
                console.log("Changed LANES_IN_USE to " + CONFIG.LANES_IN_USE);
             }
+
+            resetState();
 
             break;
 
