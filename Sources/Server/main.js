@@ -99,6 +99,9 @@ board.on("ready", function() {
   }
 
   console.log("Num lanes in use: ", CONFIG.LANES_IN_USE);
+  writelog("Initialize");
+  writelog("CONFIG.TRACKS: " + CONFIG.TRACKS.length);
+  writelog("CONFIG.LANES_IN_USE: " + CONFIG.LANES_IN_USE);
 
   resetState();
 
@@ -210,6 +213,8 @@ function getLastLogLine() {
       response = require("child_process").execSync("grep RACE_STATUS pwd.log | tail -1").toString();
       if (response.includes(" - "))
          response = response.split(" - ")[1];
+      else
+         response = "{}";
    }
 
    return response;
