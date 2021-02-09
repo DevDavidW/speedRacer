@@ -60,8 +60,11 @@ var CONFIG = {
     HTTP_PORT: 8080,
     LANES_IN_USE: 4,
     LANES_COMPLETED: 0,
+    LANE_TIMEOUT: 10000,
     RACE_STATUS: "WAIT"
 };
+
+var timeoutObj;
 
 board.on("ready", function() {
 
@@ -75,6 +78,10 @@ board.on("ready", function() {
       CONFIG.RELEASE.startTime = Date.now(); // Record time
       CONFIG.LED_INDICATOR.ctl.blink(500); // Blink until reset
       CONFIG.RACE_STATUS = "RACING";
+
+      //Start timer to check for incomplete lanes
+      timeoutObj = setTimeout(checkCancelLanes, CONFIG.LANE_TIMEOUT);
+
       console.log("Race started!");
     }
   });
@@ -82,9 +89,9 @@ board.on("ready", function() {
   // Resets track state (clears all records)
   // Will also blink light to indicate that the track has been reset.
   CONFIG.RESET.ctl.on("down", function() {
-    resetState();
-  }).on("up", function(){
     updateLEDState(0);
+  }).on("up", function(){
+    resetState();
   });
 
   // Setup tracks based on CONFIG
@@ -190,6 +197,7 @@ function getState(config) {
     var state = {};
 
     state.RACE_STATUS = config.RACE_STATUS;
+    state.LANES_IN_USE = config.LANES_IN_USE;
     state.START_TIME = config.RELEASE.startTime;
 
     state.TRACKS = [];
@@ -223,6 +231,9 @@ function getLastLogLine() {
 
 // Reset all recorded and computed times, for all tracks
 function resetState(){
+  if (timeoutObj)
+     clearTimeout(timeoutObj); //clear timer if running 
+
   CONFIG.RELEASE.startTime = '';
   for (var i = 0; i < CONFIG.TRACKS.length; i++) {
     CONFIG.TRACKS[i].endTime = '';
@@ -231,6 +242,7 @@ function resetState(){
   CONFIG.RACE_STATUS = "WAIT";
   CONFIG.LANES_COMPLETED = 0;
 
+  CONFIG.LED_INDICATOR.ctl.stop(); //stop blinking
   updateLEDState(1);
 
   writelog("RESET LANES=" + CONFIG.LANES_IN_USE);
@@ -250,6 +262,9 @@ function setLaneCompleted(lane){
 
     //check if last lane then end race
     if (CONFIG.LANES_IN_USE == CONFIG.LANES_COMPLETED && CONFIG.RACE_STATUS != "COMPLETE") {
+       if (timeoutObj)
+          clearTimeout(timeoutObj); //clear timer if running
+
        CONFIG.RACE_STATUS = "COMPLETE";
        CONFIG.LED_INDICATOR.ctl.stop(); //stop blinking
        updateLEDState(0);
@@ -258,6 +273,17 @@ function setLaneCompleted(lane){
        //write results to log
        writelog(JSON.stringify(getState(CONFIG)));
     }
+}
+
+function checkCancelLanes() {
+   //here we assume some lanes did not finish
+   CONFIG.RACE_STATUS = "COMPLETE";
+   CONFIG.LED_INDICATOR.ctl.stop(); //stop blinking
+   updateLEDState(0);
+   console.log("Timer expired - Race Complete");
+
+   //write results to log
+   writelog(JSON.stringify(getState(CONFIG)));
 }
 
 // @params startTime - initial time at which car was released
